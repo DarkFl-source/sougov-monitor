@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+data/*
+!data/oportunidades.json
+!data/oportunidades.csv
+output/
+!.gitkeep
+.playwright-cli/
