@@ -8,7 +8,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from playwright.sync_api import BrowserContext, Page, TimeoutError, sync_playwright
@@ -20,6 +20,9 @@ DEFAULT_STATE_PATH = Path("output/playwright/sougov-auth.json")
 DEFAULT_JSON_PATH = Path("data/oportunidades.json")
 DEFAULT_CSV_PATH = Path("data/oportunidades.csv")
 DEFAULT_EDITAIS_DIR = Path("data/editais")
+DEFAULT_PROFILE_DIR = Path("output/playwright/chrome-profile")
+CHROME_ARGS = ["--disable-blink-features=AutomationControlled"]
+CHROME_IGNORE_DEFAULT_ARGS = ["--enable-automation"]
 
 
 @dataclass
@@ -67,6 +70,13 @@ class Opportunity:
     edital_pdf_status: str | None = None
 
 
+@dataclass
+class ScraperSession:
+    context: BrowserContext
+    page: Page
+    close: Callable[[], None]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Coleta oportunidades do SOUGOV e aplica filtros locais mais amigaveis."
@@ -75,6 +85,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json-out", type=Path, default=DEFAULT_JSON_PATH)
     parser.add_argument("--csv-out", type=Path, default=DEFAULT_CSV_PATH)
     parser.add_argument("--editais-dir", type=Path, default=DEFAULT_EDITAIS_DIR)
+    parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE_DIR)
+    parser.add_argument(
+        "--attach-cdp",
+        help="Conecta a um Chrome aberto manualmente com --remote-debugging-port, ex.: http://127.0.0.1:9222",
+    )
     parser.add_argument("--headless", action="store_true", help="Executa o navegador sem UI.")
     parser.add_argument(
         "--refresh-login",
@@ -162,6 +177,24 @@ def page_requires_login(page: Page) -> bool:
     if "sso.acesso.gov.br" in current:
         return True
     return page.locator("div.item-edital").count() == 0
+
+
+def harden_context(context: BrowserContext) -> BrowserContext:
+    context.add_init_script(
+        """
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        """
+    )
+    return context
+
+
+def create_page_for_context(context: BrowserContext) -> tuple[Page, bool]:
+    existing_pages = context.pages
+    if existing_pages:
+        return existing_pages[0], False
+    return context.new_page(), True
 
 
 def login_if_needed(page: Page, state_file: Path, force_refresh: bool) -> None:
@@ -680,29 +713,92 @@ def print_summary(items: list[Opportunity], limit: int | None) -> None:
         print(f"... {len(items) - limit} itens adicionais omitidos do terminal.")
 
 
-def create_context(browser_type, state_file: Path, headless: bool) -> BrowserContext:
+def create_managed_session(playwright, state_file: Path, profile_dir: Path, headless: bool, force_refresh: bool) -> ScraperSession:
+    if force_refresh:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            channel="chrome",
+            headless=False,
+            no_viewport=True,
+            accept_downloads=True,
+            args=CHROME_ARGS,
+            ignore_default_args=CHROME_IGNORE_DEFAULT_ARGS,
+        )
+        context = harden_context(context)
+        page, _ = create_page_for_context(context)
+        return ScraperSession(context=context, page=page, close=context.close)
+
+    browser = playwright.chromium.launch(
+        channel="chrome",
+        headless=headless,
+        args=CHROME_ARGS,
+        ignore_default_args=CHROME_IGNORE_DEFAULT_ARGS,
+    )
     context_args = {"storage_state": str(state_file)} if state_file.exists() else {}
-    browser = browser_type.launch(headless=headless)
-    return browser.new_context(**context_args)
+    context = browser.new_context(accept_downloads=True, **context_args)
+    context = harden_context(context)
+    page, _ = create_page_for_context(context)
+
+    def close_managed() -> None:
+        context.close()
+        browser.close()
+
+    return ScraperSession(context=context, page=page, close=close_managed)
+
+
+def create_attached_session(playwright, cdp_url: str) -> ScraperSession:
+    try:
+        browser = playwright.chromium.connect_over_cdp(cdp_url)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"Nao foi possivel conectar ao Chrome em {cdp_url}. "
+            "Abra o Chrome manualmente com --remote-debugging-port=9222 e mantenha-o aberto."
+        ) from exc
+    if not browser.contexts:
+        raise RuntimeError(
+            "Nenhum contexto foi encontrado no Chrome conectado. Abra o Chrome manual com --remote-debugging-port "
+            "e mantenha ao menos uma aba aberta antes de anexar."
+        )
+    context = browser.contexts[0]
+    page, page_created = create_page_for_context(context)
+
+    def close_attached() -> None:
+        try:
+            if page_created and not page.is_closed():
+                page.close()
+        except Exception:  # noqa: BLE001
+            pass
+        browser.close()
+
+    return ScraperSession(context=context, page=page, close=close_attached)
 
 
 def main() -> int:
     args = parse_args()
 
     with sync_playwright() as playwright:
-        context = create_context(playwright.chromium, args.state_file, headless=args.headless)
-        page = context.new_page()
+        if args.attach_cdp:
+            session = create_attached_session(playwright, args.attach_cdp)
+        else:
+            session = create_managed_session(
+                playwright,
+                args.state_file,
+                args.profile_dir,
+                headless=args.headless,
+                force_refresh=args.refresh_login,
+            )
         try:
-            login_if_needed(page, args.state_file, force_refresh=args.refresh_login)
-            expand_all_cards(page)
-            items = collect_opportunities(page)
+            login_if_needed(session.page, args.state_file, force_refresh=args.refresh_login)
+            expand_all_cards(session.page)
+            items = collect_opportunities(session.page)
             items = filter_items(items, args)
             if args.max_details is not None:
                 items = items[: args.max_details]
-            items = enrich_with_edital_pdfs(context, items, args.editais_dir)
-            items = enrich_with_details(context, items)
+            items = enrich_with_edital_pdfs(session.context, items, args.editais_dir)
+            items = enrich_with_details(session.context, items)
         finally:
-            context.close()
+            session.close()
 
     filtered_items = items
     save_json(filtered_items, args.json_out)

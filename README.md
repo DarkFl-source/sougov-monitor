@@ -35,6 +35,12 @@ Se o arquivo de autenticacao ainda nao existir ou estiver expirado:
 
 Depois escolha a opcao de scraping com novo login manual. O navegador vai abrir, voce conclui o login no GOV.BR e volta ao terminal para continuar.
 
+Se o login no navegador aberto pelo scraper ficar instavel, use o modo mais robusto:
+
+1. no menu de [2_executar_solucao.bat](D:\Desenvolvimento\GovBR\2_executar_solucao.bat), escolha `3 - Abrir Chrome manual para login no SOUGOV`
+2. faça o login no SOUGOV nesse Chrome manual
+3. depois volte ao menu e escolha `4 - Conectar ao Chrome manual ja autenticado`
+
 ## Exemplos
 
 Coleta completa:
@@ -106,7 +112,9 @@ Fluxo sugerido no dia a dia:
 2. No uso diário, rodar [2_executar_solucao.bat](D:\Desenvolvimento\GovBR\2_executar_solucao.bat).
 3. Escolher `1` para atualizar a base normalmente.
 4. Escolher `2` quando a sessão expirar.
-5. Escolher `3` ou `4` para abrir o painel.
+5. Escolher `3` para abrir um Chrome manual pronto para login, quando precisar.
+6. Escolher `4` para anexar ao Chrome manual ja autenticado.
+7. Escolher `5` ou `6` para abrir o painel.
 
 Os atalhos antigos continuam no projeto como utilitarios diretos:
 
