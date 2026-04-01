@@ -115,6 +115,7 @@ Fluxo sugerido no dia a dia:
 5. Escolher `3` para abrir um Chrome manual pronto para login, quando precisar.
 6. Escolher `4` para anexar ao Chrome manual ja autenticado.
 7. Escolher `5` ou `6` para abrir o painel.
+8. Escolher `7` para fazer `commit` e `push` e atualizar o Streamlit web com a base mais recente.
 
 Os atalhos antigos continuam no projeto como utilitarios diretos:
 

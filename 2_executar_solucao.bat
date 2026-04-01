@@ -27,7 +27,8 @@ echo 3 - Abrir Chrome manual para login no SOUGOV
 echo 4 - Conectar ao Chrome manual ja autenticado
 echo 5 - Abrir relatorio local
 echo 6 - Atualizar base e abrir relatorio
-echo 7 - Sair
+echo 7 - Fazer commit e push
+echo 8 - Sair
 echo.
 set /p opcao=Escolha uma opcao: 
 
@@ -37,7 +38,8 @@ if "%opcao%"=="3" goto open_manual_chrome
 if "%opcao%"=="4" goto scrape_attach
 if "%opcao%"=="5" goto relatorio
 if "%opcao%"=="6" goto tudo
-if "%opcao%"=="7" goto fim
+if "%opcao%"=="7" goto git_publish
+if "%opcao%"=="8" goto fim
 
 echo.
 echo Opcao invalida.
@@ -90,6 +92,63 @@ goto menu
 call :run_scraper --headless
 if errorlevel 1 goto menu
 call :run_report
+goto menu
+
+:git_publish
+cls
+echo ==========================================
+echo Fazendo commit e push
+echo ==========================================
+echo.
+git status --short
+echo.
+set /p commit_msg=Mensagem do commit (Enter para usar padrao): 
+if "%commit_msg%"=="" set "commit_msg=Update SOUGOV app and dataset"
+
+git add -A
+if errorlevel 1 (
+    echo.
+    echo Falha ao preparar os arquivos para commit.
+    pause
+    goto menu
+)
+
+git diff --cached --quiet
+if not errorlevel 1 (
+    echo Nenhuma alteracao nova para commit.
+    echo Tentando apenas sincronizar com o remoto...
+    git push
+    if errorlevel 1 (
+        echo.
+        echo Falha no push.
+        pause
+        goto menu
+    )
+    echo.
+    echo Push concluido com sucesso.
+    pause
+    goto menu
+)
+
+git commit -m "%commit_msg%"
+if errorlevel 1 (
+    echo.
+    echo Falha ao criar o commit.
+    pause
+    goto menu
+)
+
+git push
+if errorlevel 1 (
+    echo.
+    echo O commit foi criado, mas o push falhou.
+    pause
+    goto menu
+)
+
+echo.
+echo Commit e push concluidos com sucesso.
+pause
 goto menu
 
 :run_scraper
