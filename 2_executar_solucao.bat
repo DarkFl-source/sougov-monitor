@@ -6,6 +6,7 @@ set "VENV_PYTHON=%~dp0.venv\Scripts\python.exe"
 set "CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe"
 set "CHROME_PROFILE_DIR=D:\Temp\chrome-sougov"
 set "SOUGOV_URL=https://sougov.sigepe.gov.br/sougov/"
+set "CDP_URL=http://127.0.0.1:9222/json/version"
 
 if not exist "%VENV_PYTHON%" (
     echo.
@@ -60,18 +61,8 @@ echo ==========================================
 echo Abrindo Chrome manual para login
 echo ==========================================
 echo.
-if not exist "%CHROME_PATH%" (
-    echo Chrome nao foi encontrado em:
-    echo %CHROME_PATH%
-    echo.
-    echo Ajuste o caminho no arquivo 2_executar_solucao.bat.
-    pause
-    goto menu
-)
-if not exist "%CHROME_PROFILE_DIR%" (
-    mkdir "%CHROME_PROFILE_DIR%" >nul 2>nul
-)
-start "" "%CHROME_PATH%" --remote-debugging-port=9222 --user-data-dir="%CHROME_PROFILE_DIR%" "%SOUGOV_URL%"
+call :launch_manual_chrome
+if errorlevel 1 goto menu
 echo Chrome aberto.
 echo.
 echo 1. Faca o login no SOUGOV nessa janela.
@@ -80,7 +71,32 @@ echo.
 pause
 goto menu
 
+:launch_manual_chrome
+if not exist "%CHROME_PATH%" (
+    echo Chrome nao foi encontrado em:
+    echo %CHROME_PATH%
+    echo.
+    echo Ajuste o caminho no arquivo 2_executar_solucao.bat.
+    exit /b 1
+)
+if not exist "%CHROME_PROFILE_DIR%" (
+    mkdir "%CHROME_PROFILE_DIR%" >nul 2>nul
+)
+start "" "%CHROME_PATH%" --remote-debugging-port=9222 --user-data-dir="%CHROME_PROFILE_DIR%" "%SOUGOV_URL%"
+exit /b 0
+
 :scrape_attach
+call :ensure_cdp_running
+if errorlevel 1 goto menu
+cls
+echo ==========================================
+echo Conectando ao Chrome manual
+echo ==========================================
+echo.
+echo Se voce ainda nao concluiu o login no SOUGOV, faca isso agora.
+echo Quando a tela autenticada estiver pronta, pressione qualquer tecla para continuar.
+echo.
+pause
 call :run_scraper --attach-cdp http://127.0.0.1:9222 --headless
 goto menu
 
@@ -150,6 +166,28 @@ echo.
 echo Commit e push concluidos com sucesso.
 pause
 goto menu
+
+:ensure_cdp_running
+curl --silent --fail "%CDP_URL%" >nul 2>nul
+if not errorlevel 1 exit /b 0
+
+cls
+echo ==========================================
+echo Chrome manual nao encontrado
+echo ==========================================
+echo.
+echo A opcao 4 precisa de um Chrome aberto manualmente com depuracao remota.
+echo.
+echo Vou abrir o Chrome preparado para login no SOUGOV agora.
+echo Depois de concluir o login, a opcao 4 continuara o scraping.
+echo.
+pause
+call :launch_manual_chrome
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+exit /b 0
 
 :run_scraper
 cls

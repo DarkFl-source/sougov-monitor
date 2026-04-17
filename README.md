@@ -41,6 +41,12 @@ Se o login no navegador aberto pelo scraper ficar instavel, use o modo mais robu
 2. faça o login no SOUGOV nesse Chrome manual
 3. depois volte ao menu e escolha `4 - Conectar ao Chrome manual ja autenticado`
 
+Atalho prático:
+
+- se preferir, escolha diretamente a opcao `4`
+- se o Chrome manual ainda nao estiver aberto, o menu abre o Chrome para voce
+- depois que o login estiver concluido, basta confirmar no terminal e o scraping continua
+
 ## Exemplos
 
 Coleta completa:
