@@ -22,7 +22,7 @@ def normalize_text(value: object) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def load_data(path: str) -> pd.DataFrame:
+def load_data(path: str, cache_key: int) -> pd.DataFrame:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     df = pd.DataFrame(payload["items"])
     df.attrs["capturado_em"] = payload.get("capturado_em")
@@ -67,6 +67,11 @@ def load_data(path: str) -> pd.DataFrame:
             df[column] = ""
         df[column] = df[column].fillna("").map(normalize_text)
     return df
+
+
+def get_data_cache_key(path: Path) -> int:
+    stat = path.stat()
+    return hash((str(path.resolve()), stat.st_mtime_ns, stat.st_size))
 
 
 def format_capture_timestamp(raw_value: str | None) -> str:
@@ -369,7 +374,7 @@ def main() -> None:
         st.error("Arquivo de dados não encontrado. Gere primeiro `data/oportunidades.json` com o scraper.")
         st.stop()
 
-    df = load_data(str(DATA_PATH))
+    df = load_data(str(DATA_PATH), get_data_cache_key(DATA_PATH))
     filtered = apply_filters(df)
     capturado_em = format_capture_timestamp(df.attrs.get("capturado_em"))
 
