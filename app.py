@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -11,6 +12,7 @@ import streamlit as st
 
 DATA_PATH = Path("data/oportunidades.json")
 DATE_COLUMNS = ["inscricao_inicio", "inscricao_fim"]
+UNDEFINED_OPTION = "Não definido"
 
 
 def normalize_text(value: object) -> str:
@@ -23,6 +25,8 @@ def normalize_text(value: object) -> str:
 def load_data(path: str) -> pd.DataFrame:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     df = pd.DataFrame(payload["items"])
+    df.attrs["capturado_em"] = payload.get("capturado_em")
+    df.attrs["fonte"] = payload.get("fonte")
 
     for column in DATE_COLUMNS:
         df[f"{column}_dt"] = pd.to_datetime(df[column], format="%d/%m/%Y", errors="coerce")
@@ -65,6 +69,16 @@ def load_data(path: str) -> pd.DataFrame:
     return df
 
 
+def format_capture_timestamp(raw_value: str | None) -> str:
+    if not raw_value:
+        return "-"
+    try:
+        parsed = datetime.fromisoformat(raw_value)
+    except ValueError:
+        return raw_value
+    return parsed.strftime("%d/%m/%Y %H:%M")
+
+
 def classify_deadline(days: float | int | None) -> str:
     if pd.isna(days):
         return "Prazo não informado"
@@ -84,6 +98,30 @@ def compute_keyword_score(df: pd.DataFrame, raw_terms: str) -> pd.Series:
     return df["busca_texto"].apply(lambda text: sum(1 for term in terms if term in text))
 
 
+def build_filter_options(df: pd.DataFrame, column: str) -> list[str]:
+    values = [value for value in df[column].dropna().unique() if normalize_text(value)]
+    options = sorted(values)
+    if (df[column].fillna("").map(normalize_text) == "").any():
+        options.append(UNDEFINED_OPTION)
+    return options
+
+
+def apply_multiselect_filter(df: pd.DataFrame, column: str, selected: list[str]) -> pd.DataFrame:
+    if not selected:
+        return df
+
+    selected_values = [value for value in selected if value != UNDEFINED_OPTION]
+    include_undefined = UNDEFINED_OPTION in selected
+    mask = pd.Series(False, index=df.index)
+
+    if selected_values:
+        mask = mask | df[column].isin(selected_values)
+    if include_undefined:
+        mask = mask | (df[column].fillna("").map(normalize_text) == "")
+
+    return df[mask]
+
+
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     st.sidebar.header("Filtros")
     busca = st.sidebar.text_input(
@@ -96,10 +134,10 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
         help="Separar por vírgula. O painel usa essas palavras para priorizar resultados.",
     )
 
-    orgaos = sorted(value for value in df["orgao"].dropna().unique() if value)
-    programas = sorted(value for value in df["programa_gestao"].dropna().unique() if value)
-    locais = sorted(value for value in df["local_atuacao"].dropna().unique() if value)
-    vinculacoes = sorted(value for value in df["vinculo_detalhe"].dropna().unique() if value)
+    orgaos = build_filter_options(df, "orgao")
+    programas = build_filter_options(df, "programa_gestao")
+    locais = build_filter_options(df, "local_atuacao")
+    vinculacoes = build_filter_options(df, "vinculo_detalhe")
 
     orgaos_sel = st.sidebar.multiselect("Órgão", options=orgaos)
     programas_sel = st.sidebar.multiselect("Programa de gestão", options=programas)
@@ -117,14 +155,10 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
 
     if busca:
         filtered = filtered[filtered["busca_texto"].str.contains(busca.casefold(), na=False)]
-    if orgaos_sel:
-        filtered = filtered[filtered["orgao"].isin(orgaos_sel)]
-    if programas_sel:
-        filtered = filtered[filtered["programa_gestao"].isin(programas_sel)]
-    if locais_sel:
-        filtered = filtered[filtered["local_atuacao"].isin(locais_sel)]
-    if vinculos_sel:
-        filtered = filtered[filtered["vinculo_detalhe"].isin(vinculos_sel)]
+    filtered = apply_multiselect_filter(filtered, "orgao", orgaos_sel)
+    filtered = apply_multiselect_filter(filtered, "programa_gestao", programas_sel)
+    filtered = apply_multiselect_filter(filtered, "local_atuacao", locais_sel)
+    filtered = apply_multiselect_filter(filtered, "vinculo_detalhe", vinculos_sel)
     filtered = filtered[
         filtered["dias_para_encerrar"].isna() | (filtered["dias_para_encerrar"] <= prazo_max)
     ]
@@ -337,10 +371,14 @@ def main() -> None:
 
     df = load_data(str(DATA_PATH))
     filtered = apply_filters(df)
+    capturado_em = format_capture_timestamp(df.attrs.get("capturado_em"))
+
+    st.info(f"Base atualizada em: **{capturado_em}**")
 
     st.sidebar.markdown("---")
     st.sidebar.write(f"Base carregada: **{len(df)}** oportunidades")
     st.sidebar.write(f"Recorte atual: **{len(filtered)}** oportunidades")
+    st.sidebar.write(f"Última atualização: **{capturado_em}**")
 
     render_metrics(filtered)
     download_filtered_csv(filtered)
